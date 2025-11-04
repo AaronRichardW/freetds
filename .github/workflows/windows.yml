@@ -92,9 +92,9 @@ jobs:
           run: |
             cd build
             mkdir -p ${ARTIFACT_NAME}/bin ${ARTIFACT_NAME}/lib ${ARTIFACT_NAME}/include
-            cp ${PREFIX}/bin/* ${ARTIFACT_NAME}/bin/
-            cp ${PREFIX}/lib/* ${ARTIFACT_NAME}/lib/
-            cp ${PREFIX}/include/* ${ARTIFACT_NAME}/include/
+            cp -r ${PREFIX}/bin/* ${ARTIFACT_NAME}/bin/
+            cp -r ${PREFIX}/lib/* ${ARTIFACT_NAME}/lib/
+            cp -r ${PREFIX}/include/* ${ARTIFACT_NAME}/include/
             7z a ${ARTIFACT_NAME}.zip ${ARTIFACT_NAME}
 
         - name: 上传构建产物
