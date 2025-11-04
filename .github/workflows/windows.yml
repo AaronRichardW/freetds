@@ -1,81 +1,74 @@
-name: Windows
+name: Windows 64-bit Build
 
 on:
-    push:
-        branches:
-            - '**'
-        paths-ignore:
-            - .github/workflows/macos.yml
-            - .github/workflows/linux.yml
-        tags:
-            - 'v[0-9]+.[0-9]+.[0-9]+'
-            - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
-    pull_request:
-        branches:
-            - '**'
-        paths-ignore:
-            - .github/workflows/macos.yml
-            - .github/workflows/linux.yml
-
-    workflow_dispatch:
-
-# Declare default permissions as read only.
-permissions: read-all
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 支持手动触发构建
 
 jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
 
-    build:
+      - name: 安装 CMake
+        uses: lukka/get-cmake@latest
 
-        runs-on: ${{ matrix.os }}
+      - name: 安装 Visual Studio Build Tools
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17,)'  # 适配 Visual Studio 2022 及以上版本
 
-        strategy:
-            fail-fast: false
-            matrix:
-                os: [windows-latest]
+      - name: 安装依赖（OpenSSL、gperf、iconv）
+        run: |
+          choco install openssl --version=3.1.1
+          choco install gperf
+          # 安装 iconv
+          $iconvUrl = "https://github.com/win-iconv/win-iconv/releases/download/v0.0.8/win-iconv-0.0.8.zip"
+          Invoke-WebRequest -Uri $iconvUrl -OutFile win_iconv.zip
+          Expand-Archive win_iconv.zip -DestinationPath .
+          mv win-iconv-0.0.8 iconv
+          mkdir iconv-build
+          cd iconv-build
+          cmake -G "NMake Makefiles" -DBUILD_STATIC=ON -DBUILD_SHARED=OFF -DBUILD_EXECUTABLE=OFF -DBUILD_TEST=ON -DCMAKE_BUILD_TYPE=Release ..\iconv
+          nmake
+          cd ..
+          mkdir -p build/lib
+          cp iconv/iconv.h .
+          cp iconv-build/iconv.lib ./build/lib
 
-        env:
-            PREFIX: /freetds
-            ICONV_URL: https://codeload.github.com/win-iconv/win-iconv/zip
-            ICONV_VER: 0.0.8
+      - name: 创建并进入构建目录
+        run: mkdir build && cd build
 
-        steps:
+      - name: 配置 CMake
+        run: |
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_MSDBLIB=ON \
+            -DWITH_OPENSSL=ON \
+            -DICONV_LIBRARY=../build/lib/iconv.lib \
+            -DICONV_INCLUDE_DIR=..
 
-        - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-          with:
-            fetch-depth: 0
+      - name: 编译 FreeTDS
+        run: |
+          cd build
+          msbuild ALL_BUILD.vcxproj /p:Configuration=Release /p:Platform=x64
 
-        - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: 打包输出
+        run: |
+          cd build
+          mkdir freetds-win64
+          cp -r bin/Release/* freetds-win64/
+          cp -r lib/Release/* freetds-win64/
+          cp -r include/* freetds-win64/include/
+          7z a freetds-win64.zip freetds-win64
 
-        - name: Install OpenSSL & perf
-          run: |
-            choco install openssl --version=3.1.1
-            choco install gperf
-
-        - name: Install & build dependencies
-          shell:  bash
-          run: |
-            curl -sSf ${ICONV_URL}/v${ICONV_VER} -o win_iconv.zip
-            7z x win_iconv.zip
-            mv win-iconv-${ICONV_VER} iconv
-            mkdir iconv-build
-            cd iconv-build
-            cmake -G "NMake Makefiles" \
-                    -DBUILD_STATIC=on \
-                    -DBUILD_SHARED=off \
-                    -DBUILD_EXECUTABLE=off \
-                    -DBUILD_TEST=on \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    ../iconv
-            nmake
-            cd ..
-            mkdir -p build/lib
-            cp iconv/iconv.h .
-            cp iconv-build/iconv.lib ./lib
-            cd build
-            cmake -G "NMake Makefiles" \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DENABLE_MSDBLIB=on \
-                    -DWITH_OPENSSL=ON \
-                    -DCMAKE_INSTALL_PREFIX:PATH=$PREFIX \
-                    ..
-            nmake
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v3
+        with:
+          name: freetds-win64
+          path: build/freetds-win64.zip
