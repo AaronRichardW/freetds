@@ -1,9 +1,8 @@
-name: Windows
+name: Windows 64-bit Build
 
 on:
     push:
-        branches:
-            - '**'
+        branches: [ main ]
         paths-ignore:
             - .github/workflows/macos.yml
             - .github/workflows/linux.yml
@@ -11,94 +10,88 @@ on:
             - 'v[0-9]+.[0-9]+.[0-9]+'
             - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
     pull_request:
-        branches:
-            - '**'
+        branches: [ main ]
         paths-ignore:
             - .github/workflows/macos.yml
             - .github/workflows/linux.yml
-
     workflow_dispatch:
 
-# Declare default permissions as read only.
 permissions: read-all
 
 jobs:
-
     build:
-
-        runs-on: ${{ matrix.os }}
-
-        strategy:
-            fail-fast: false
-            matrix:
-                os: [windows-latest]
-
+        runs-on: windows-latest
         env:
-            PREFIX: /freetds
-            ICONV_URL: https://codeload.github.com/win-iconv/win-iconv/zip
-            ICONV_VER: 0.0.8
+            INSTALL_PREFIX: C:/freetds
             ARTIFACT_NAME: freetds-win64
+            ICONV_VERSION: 0.0.8
+            OPENSSL_VERSION: 3.1.1
 
         steps:
-
-        - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        - uses: actions/checkout@v4
           with:
             fetch-depth: 0
 
-        - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        - name: 配置 MSVC 开发环境
+          uses: ilammy/msvc-dev-cmd@v1
 
-        - name: Install OpenSSL & perf
+        - name: 安装依赖工具
           run: |
-            choco install openssl --version=3.1.1
+            choco install openssl --version=${{ env.OPENSSL_VERSION }}
             choco install gperf
+            choco install 7zip
 
-        - name: Install & build dependencies
-          shell:  bash
+        - name: 下载并编译 iconv
+          shell: bash
           run: |
-            curl -sSf ${ICONV_URL}/v${ICONV_VER} -o win_iconv.zip
+            curl -sSL "https://codeload.github.com/win-iconv/win-iconv/zip/v${{ env.ICONV_VERSION }}" -o win_iconv.zip
             7z x win_iconv.zip
-            mv win-iconv-${ICONV_VER} iconv
+            mv "win-iconv-${{ env.ICONV_VERSION }}" iconv
             mkdir iconv-build
             cd iconv-build
-            cmake -G "NMake Makefiles" \
-                    -DBUILD_STATIC=on \
-                    -DBUILD_SHARED=off \
-                    -DBUILD_EXECUTABLE=off \
-                    -DBUILD_TEST=on \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    ../iconv
+            cmake -G "NMake Makefiles" ^
+                  -DBUILD_STATIC=ON ^
+                  -DBUILD_SHARED=OFF ^
+                  -DBUILD_EXECUTABLE=OFF ^
+                  -DBUILD_TEST=ON ^
+                  -DCMAKE_BUILD_TYPE=Release ^
+                  ../iconv
             nmake
             cd ..
             mkdir -p build/lib
             cp iconv/iconv.h .
             cp iconv-build/iconv.lib ./lib
-            cd build
-            cmake -G "NMake Makefiles" \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DENABLE_MSDBLIB=on \
-                    -DWITH_OPENSSL=ON \
-                    -DCMAKE_INSTALL_PREFIX:PATH=$PREFIX \
-                    ..
-            nmake
 
-        - name: 编译安装 FreeTDS
+        - name: 配置并编译 FreeTDS
           shell: bash
           run: |
             cd build
+            cmake -G "NMake Makefiles" ^
+                  -DCMAKE_BUILD_TYPE=Release ^
+                  -DENABLE_MSDBLIB=ON ^
+                  -DWITH_OPENSSL=ON ^
+                  -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_PREFIX }}" ^
+                  ..
+            nmake
             nmake install
 
-        - name: 打包编译产物
+        - name: 打包可执行文件与依赖
           shell: bash
           run: |
             cd build
-            mkdir -p ${ARTIFACT_NAME}/bin ${ARTIFACT_NAME}/lib ${ARTIFACT_NAME}/include
-            cp -r ${PREFIX}/bin/* ${ARTIFACT_NAME}/bin/
-            cp -r ${PREFIX}/lib/* ${ARTIFACT_NAME}/lib/
-            cp -r ${PREFIX}/include/* ${ARTIFACT_NAME}/include/
-            7z a ${ARTIFACT_NAME}.zip ${ARTIFACT_NAME}
+            mkdir -p ${{ env.ARTIFACT_NAME }}/bin ${{ env.ARTIFACT_NAME }}/lib ${{ env.ARTIFACT_NAME }}/include
+            # 复制 FreeTDS 核心文件
+            cp -r "${{ env.INSTALL_PREFIX }}/bin/"* ${{ env.ARTIFACT_NAME }}/bin/
+            cp -r "${{ env.INSTALL_PREFIX }}/lib/"* ${{ env.ARTIFACT_NAME }}/lib/
+            cp -r "${{ env.INSTALL_PREFIX }}/include/"* ${{ env.ARTIFACT_NAME }}/include/
+            # 复制 OpenSSL 依赖（保证运行时兼容性）
+            cp "C:/Program Files/OpenSSL-Win64/bin/libcrypto-3-x64.dll" ${{ env.ARTIFACT_NAME }}/bin/
+            cp "C:/Program Files/OpenSSL-Win64/bin/libssl-3-x64.dll" ${{ env.ARTIFACT_NAME }}/bin/
+            # 打包成 zip
+            7z a ${{ env.ARTIFACT_NAME }}.zip ${{ env.ARTIFACT_NAME }}
 
         - name: 上传构建产物
           uses: actions/upload-artifact@v4
           with:
-            name: ${ARTIFACT_NAME}
-            path: build/${ARTIFACT_NAME}.zip
+            name: ${{ env.ARTIFACT_NAME }}
+            path: build/${{ env.ARTIFACT_NAME }}.zip
