@@ -37,6 +37,7 @@ jobs:
             PREFIX: /freetds
             ICONV_URL: https://codeload.github.com/win-iconv/win-iconv/zip
             ICONV_VER: 0.0.8
+            ARTIFACT_NAME: freetds-win64
 
         steps:
 
@@ -79,3 +80,25 @@ jobs:
                     -DCMAKE_INSTALL_PREFIX:PATH=$PREFIX \
                     ..
             nmake
+
+        - name: 编译安装 FreeTDS
+          shell: bash
+          run: |
+            cd build
+            nmake install
+
+        - name: 打包编译产物
+          shell: bash
+          run: |
+            cd build
+            mkdir -p ${ARTIFACT_NAME}/bin ${ARTIFACT_NAME}/lib ${ARTIFACT_NAME}/include
+            cp ${PREFIX}/bin/* ${ARTIFACT_NAME}/bin/
+            cp ${PREFIX}/lib/* ${ARTIFACT_NAME}/lib/
+            cp ${PREFIX}/include/* ${ARTIFACT_NAME}/include/
+            7z a ${ARTIFACT_NAME}.zip ${ARTIFACT_NAME}
+
+        - name: 上传构建产物
+          uses: actions/upload-artifact@v4
+          with:
+            name: ${ARTIFACT_NAME}
+            path: build/${ARTIFACT_NAME}.zip
