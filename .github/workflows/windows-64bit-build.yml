@@ -68,7 +68,7 @@ jobs:
           7z a freetds-win64.zip freetds-win64
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: freetds-win64
-          path: build/freetds-win64.zip
+         name: freetds-win64
+         path: build/freetds-win64.zip
